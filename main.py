@@ -8,7 +8,7 @@ import yt_dlp
 
 app = FastAPI()
 
-# Enable CORS so your GitHub Pages website can talk to Render
+# Enable CORS for frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,13 +17,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Input format sent from your website
+# Matches the exact JSON sent from index.html
 class ClipRequest(BaseModel):
-    video_url: str
-    start_time: str  # Example: "00:00:10" or "10"
-    end_time: str    # Example: "00:00:20" or "20"
+    url: str
+    start_time: int
+    duration: int
 
-# Fix for YouTube blocking Render IP and missing JavaScript runtime
 YDL_OPTS = {
     'format': 'mp4/best',
     'quiet': True,
@@ -50,26 +49,27 @@ def create_clip(request: ClipRequest):
     input_file = "input_video.mp4"
     output_file = "clipped_video.mp4"
 
-    # Clean up any leftover files from previous runs
+    # Clean up leftover files
     for f in [input_file, output_file]:
         if os.path.exists(f):
             os.remove(f)
 
-    # 1. Download video using yt-dlp
+    # 1. Download video
     try:
         with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
-            ydl.download([request.video_url])
+            ydl.download([request.url])
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"YouTube Download Failed: {str(e)}")
 
-    # 2. Trim video using FFmpeg
+    # 2. Trim and crop to 9:16 vertical video using FFmpeg
     try:
         ffmpeg_cmd = [
             "ffmpeg",
             "-y",
             "-ss", str(request.start_time),
-            "-to", str(request.end_time),
+            "-t", str(request.duration),
             "-i", input_file,
+            "-vf", "crop=ih*(9/16):ih", # Crops center to 9:16 vertical Short
             "-c:v", "libx264",
             "-c:a", "aac",
             output_file
@@ -78,8 +78,8 @@ def create_clip(request: ClipRequest):
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail=f"FFmpeg Clipping Failed: {str(e)}")
 
-    # 3. Return the clipped video file back to the website
+    # 3. Return finished clip
     if os.path.exists(output_file):
-        return FileResponse(output_file, media_type="video/mp4", filename="clip.mp4")
+        return FileResponse(output_file, media_type="video/mp4", filename="apex_short.mp4")
     
-    raise HTTPException(status_code=500, detail="Clip processing completed but output file missing.")
+    raise HTTPException(status_code=500, detail="Clip completed but output file is missing.")
