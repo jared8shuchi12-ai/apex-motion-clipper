@@ -1,13 +1,14 @@
+import os
+import subprocess
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import yt_dlp
-import os
-import subprocess
 
-app = FastAPI(title="Apex Motion Clipper API")
+app = FastAPI()
 
+# Enable CORS so your GitHub Pages website can talk to Render
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -16,57 +17,69 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Input format sent from your website
 class ClipRequest(BaseModel):
-    url: str
-    start_time: int  # in seconds
-    duration: int    # in seconds (e.g., 30 for a 30s short)
+    video_url: str
+    start_time: str  # Example: "00:00:10" or "10"
+    end_time: str    # Example: "00:00:20" or "20"
+
+# Fix for YouTube blocking Render IP and missing JavaScript runtime
+YDL_OPTS = {
+    'format': 'mp4/best',
+    'quiet': True,
+    'no_warnings': True,
+    'outtmpl': 'input_video.mp4',
+    'overwrites': True,
+    'http_headers': {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+    },
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['ios', 'mweb']
+        }
+    }
+}
 
 @app.get("/")
-def home():
+def read_root():
     return {"status": "Apex Motion Clipper API is active"}
 
 @app.post("/create-clip")
 def create_clip(request: ClipRequest):
-    os.makedirs("/tmp/clips", exist_ok=True)
-    output_filename = f"/tmp/clips/short_{request.start_time}_{request.duration}.mp4"
-    
-    # Extract direct video/audio stream URL without downloading full video
-    ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'quiet': True,
-    }
-    
+    input_file = "input_video.mp4"
+    output_file = "clipped_video.mp4"
+
+    # Clean up any leftover files from previous runs
+    for f in [input_file, output_file]:
+        if os.path.exists(f):
+            os.remove(f)
+
+    # 1. Download video using yt-dlp
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(request.url, download=False)
-            stream_url = info.get('url')
-            
-            if not stream_url:
-                # If separate streams exist, fetch primary video stream
-                formats = info.get('formats', [])
-                for fmt in formats:
-                    if fmt.get('vcodec') != 'none':
-                        stream_url = fmt.get('url')
-                        break
+        with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
+            ydl.download([request.video_url])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"YouTube Download Failed: {str(e)}")
 
-        if not stream_url:
-            raise HTTPException(status_code=400, detail="Could not retrieve playable video stream.")
-
-        # FFmpeg command: Cut clip and crop from 16:9 (horizontal) to 9:16 (vertical Short)
+    # 2. Trim video using FFmpeg
+    try:
         ffmpeg_cmd = [
-            "ffmpeg", "-y",
+            "ffmpeg",
+            "-y",
             "-ss", str(request.start_time),
-            "-i", stream_url,
-            "-t", str(request.duration),
-            "-vf", "crop=ih*(9/16):ih",
+            "-to", str(request.end_time),
+            "-i", input_file,
             "-c:v", "libx264",
             "-c:a", "aac",
-            "-strict", "experimental",
-            output_filename
+            output_file
         ]
-
         subprocess.run(ffmpeg_cmd, check=True)
-        return FileResponse(output_filename, media_type="video/mp4", filename="short_clip.mp4")
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail=f"FFmpeg Clipping Failed: {str(e)}")
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # 3. Return the clipped video file back to the website
+    if os.path.exists(output_file):
+        return FileResponse(output_file, media_type="video/mp4", filename="clip.mp4")
+    
+    raise HTTPException(status_code=500, detail="Clip processing completed but output file missing.")
