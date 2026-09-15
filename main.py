@@ -23,30 +23,25 @@ class ClipRequest(BaseModel):
     start_time: int
     duration: int
 
-# Updated ydl_opts using modern client fallbacks to bypass 403 Forbidden on cloud hosts
 YDL_OPTS = {
     'format': 'bestvideo+bestaudio/best',
     'outtmpl': 'input_video.%(ext)s',
     'overwrites': True,
     'nocheckcertificate': True,
-    'ignoreerrors': False,
-    'logtostderr': False,
     'quiet': True,
     'no_warnings': True,
     'http_headers': {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
     },
     'extractor_args': {
         'youtube': {
-            'player_client': ['web', 'android', 'tv_embedded'],
-            'player_skip': ['webpage', 'configs']
+            'player_client': ['android', 'web']
         }
     }
 }
 
-# Add cookies file only if a valid one exists on the server
+# Add cookies file if present on server
 if os.path.exists('cookies.txt'):
     YDL_OPTS['cookiefile'] = 'cookies.txt'
 
@@ -62,7 +57,7 @@ def create_clip(request: ClipRequest):
     if os.path.exists(output_file):
         os.remove(output_file)
 
-    # 1. Download video with updated client options
+    # 1. Download video
     downloaded_file = None
     try:
         with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
