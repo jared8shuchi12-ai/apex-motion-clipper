@@ -24,12 +24,13 @@ class ClipRequest(BaseModel):
     duration: int
 
 YDL_OPTS = {
-    'format': 'mp4/best',
+    'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+    'merge_output_format': 'mp4',
     'quiet': True,
     'no_warnings': True,
     'outtmpl': 'input_video.mp4',
     'overwrites': True,
-    'cookiefile': 'cookies.txt',  # Passes your exported cookies to bypass YouTube bot detection
+    'cookiefile': 'cookies.txt',  # Reads your uploaded cookies to bypass YouTube bot detection
     'http_headers': {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept-Language': 'en-US,en;q=0.9',
@@ -55,7 +56,7 @@ def create_clip(request: ClipRequest):
         if os.path.exists(f):
             os.remove(f)
 
-    # 1. Download video using cookies
+    # 1. Download video using cookies and merge best streams
     try:
         with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
             ydl.download([request.url])
