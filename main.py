@@ -24,13 +24,10 @@ class ClipRequest(BaseModel):
     duration: int
 
 YDL_OPTS = {
-    'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-    'merge_output_format': 'mp4',
-    'quiet': True,
-    'no_warnings': True,
-    'outtmpl': 'input_video.mp4',
+    'format': 'bestvideo+bestaudio/best',  # Accepts any format YouTube has available
+    'outtmpl': 'input_video.%(ext)s',
     'overwrites': True,
-    'cookiefile': 'cookies.txt',  # Reads your uploaded cookies to bypass YouTube bot detection
+    'cookiefile': 'cookies.txt',  # Reads your uploaded cookies
     'http_headers': {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept-Language': 'en-US,en;q=0.9',
@@ -48,30 +45,30 @@ def read_root():
 
 @app.post("/create-clip")
 def create_clip(request: ClipRequest):
-    input_file = "input_video.mp4"
     output_file = "clipped_video.mp4"
 
-    # Clean up leftover files from previous runs
-    for f in [input_file, output_file]:
-        if os.path.exists(f):
-            os.remove(f)
+    # Clean up old clipped files
+    if os.path.exists(output_file):
+        os.remove(output_file)
 
-    # 1. Download video using cookies and merge best streams
+    # 1. Download video (yt-dlp will find whatever format exists)
+    downloaded_file = None
     try:
         with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
-            ydl.download([request.url])
+            info = ydl.extract_info(request.url, download=True)
+            downloaded_file = ydl.prepare_filename(info)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"YouTube Download Failed: {str(e)}")
 
-    # 2. Trim and crop to 9:16 vertical Short format using FFmpeg
+    # 2. Trim, crop to 9:16 vertical Short, and convert to MP4 using FFmpeg
     try:
         ffmpeg_cmd = [
             "ffmpeg",
             "-y",
             "-ss", str(request.start_time),
             "-t", str(request.duration),
-            "-i", input_file,
-            "-vf", "crop=ih*(9/16):ih", # Crops center into 9:16 vertical format
+            "-i", downloaded_file,
+            "-vf", "crop=ih*(9/16):ih",  # Crops center into 9:16 vertical format
             "-c:v", "libx264",
             "-c:a", "aac",
             output_file
@@ -79,8 +76,12 @@ def create_clip(request: ClipRequest):
         subprocess.run(ffmpeg_cmd, check=True)
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail=f"FFmpeg Clipping Failed: {str(e)}")
+    finally:
+        # Clean up downloaded raw file
+        if downloaded_file and os.path.exists(downloaded_file):
+            os.remove(downloaded_file)
 
-    # 3. Return finished clip to the frontend
+    # 3. Return finished MP4 clip
     if os.path.exists(output_file):
         return FileResponse(output_file, media_type="video/mp4", filename="apex_short.mp4")
     
