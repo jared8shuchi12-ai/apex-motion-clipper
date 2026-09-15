@@ -24,7 +24,7 @@ class ClipRequest(BaseModel):
     duration: int
 
 YDL_OPTS = {
-    'format': 'bestvideo+bestaudio/best',
+    'format': 'best',  # Grabs the best available combined stream reliably
     'outtmpl': 'input_video.%(ext)s',
     'overwrites': True,
     'nocheckcertificate': True,
