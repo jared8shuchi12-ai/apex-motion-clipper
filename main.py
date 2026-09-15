@@ -8,7 +8,7 @@ import yt_dlp
 
 app = FastAPI()
 
-# Enable CORS for your GitHub Pages website
+# Enable CORS for your GitHub Pages frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,14 +17,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Matches the exact JSON sent from index.html
+# Matches the JSON request sent from index.html
 class ClipRequest(BaseModel):
     url: str
     start_time: int
     duration: int
 
 YDL_OPTS = {
-    'format': 'best',  # Grabs the best available combined stream reliably
+    # Grabs any best video + audio stream combo available
+    'format': 'bv*+ba/b',
     'outtmpl': 'input_video.%(ext)s',
     'overwrites': True,
     'nocheckcertificate': True,
@@ -36,12 +37,13 @@ YDL_OPTS = {
     },
     'extractor_args': {
         'youtube': {
-            'player_client': ['android', 'web']
+            # Multi-client fallback ensures formats can be extracted on cloud IPs
+            'player_client': ['ios', 'android', 'mweb', 'web']
         }
     }
 }
 
-# Add cookies file if present on server
+# Load cookies file if present in the repository
 if os.path.exists('cookies.txt'):
     YDL_OPTS['cookiefile'] = 'cookies.txt'
 
@@ -53,11 +55,11 @@ def read_root():
 def create_clip(request: ClipRequest):
     output_file = "clipped_video.mp4"
 
-    # Clean up old clipped files
+    # Clean up previous output file
     if os.path.exists(output_file):
         os.remove(output_file)
 
-    # 1. Download video
+    # 1. Download video using yt-dlp
     downloaded_file = None
     try:
         with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
@@ -66,7 +68,7 @@ def create_clip(request: ClipRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"YouTube Download Failed: {str(e)}")
 
-    # 2. Trim, crop to 9:16 vertical Short, and convert to MP4 using FFmpeg
+    # 2. Trim, crop to 9:16 vertical Short format, and output MP4 with FFmpeg
     try:
         ffmpeg_cmd = [
             "ffmpeg",
@@ -74,7 +76,7 @@ def create_clip(request: ClipRequest):
             "-ss", str(request.start_time),
             "-t", str(request.duration),
             "-i", downloaded_file,
-            "-vf", "crop=ih*(9/16):ih",  # Crops center into 9:16 vertical format
+            "-vf", "crop=ih*(9/16):ih",  # Center-crop to 9:16 vertical format
             "-c:v", "libx264",
             "-c:a", "aac",
             output_file
@@ -83,11 +85,11 @@ def create_clip(request: ClipRequest):
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail=f"FFmpeg Clipping Failed: {str(e)}")
     finally:
-        # Clean up downloaded raw file
+        # Remove raw input download
         if downloaded_file and os.path.exists(downloaded_file):
             os.remove(downloaded_file)
 
-    # 3. Return finished MP4 clip
+    # 3. Deliver formatted clip to frontend
     if os.path.exists(output_file):
         return FileResponse(output_file, media_type="video/mp4", filename="apex_short.mp4")
     
